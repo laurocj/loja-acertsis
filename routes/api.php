@@ -127,6 +127,26 @@ Route::get('/clientes-com-mais-de/{quant}/{seletor}/{ano?}', function ($quant = 
 });
 
 /**
+ * 4. Recomende uma peça de roupa para um determinado cliente a partir do histórico de compras
+ */
+
+Route::get('/recomenda-para/{cliente}', function ($clienteId = 1) {
+
+    $carrinhosSelecionados = Carrinho::select('produto_id')
+            ->join('itens','itens.carrinho_id','=','carrinhos.id')
+            ->where('carrinhos.cliente_id', $clienteId)
+            ->groupBy('itens.produto_id')
+            ->orderByRaw('COUNT(produto_id) DESC')
+            ->limit(1);
+
+    return Produto::select('produtos.nome', 'produtos.marca', 'produtos.tamanho')
+        ->joinSub($carrinhosSelecionados, 'carrinhos_selecionados', function ($join) {
+            $join->on('produtos.id', '=', 'carrinhos_selecionados.produto_id');
+        })
+        ->get();
+});
+
+/**
  * Importação
  */
 Route::get('/import', function () {
