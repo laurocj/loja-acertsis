@@ -38,6 +38,45 @@ Route::get('/clientes', function () {
 });
 
 /**
+ * 2. Mostre o cliente com maior compra única neste ano (2019)
+ *
+ * SELECT `clientes`.`nome`, `clientes`.`cpf`
+ * FROM  `clientes`
+ * INNER  JOIN  (
+ *    SELECT  `cliente_id`
+ *    FROM  `carrinhos`
+ *    WHERE  year(`carrinhos.data`) = '2019'
+ *   `carrinhos`.`id`
+ *    IN  (
+ *        SELECT  `itens`.`carrinho_id`
+ *        FROM  `itens`
+ *        GROUP  BY  `itens`.`carrinho_id`
+ *        HAVING  COUNT(itens.carrinho_id) = 1
+ *        )
+ *    GROUP  BY  `carrinhos`.`cliente_id`
+ * ) AS   `unica_compra`
+ * ON  `clientes`.`id` = `unica_compra`.`cliente_id`;
+ */
+Route::get('/clientes-maior-compra-unica/{ano?}', function ($ano = '2019') {
+
+    $unicaCompra = Carrinho::select('cliente_id')
+                            ->whereYear('carrinhos.data',$ano)
+                            ->whereIn('carrinhos.id',function($query) {
+                                $query->select('itens.carrinho_id')
+                                    ->from('itens')
+                                    ->groupBy('itens.carrinho_id')
+                                    ->havingRaw('COUNT(itens.carrinho_id) = ?', [1]);
+                            })
+                            ->groupBy('carrinhos.cliente_id');
+
+    return Cliente::select('clientes.nome', 'clientes.cpf')
+        ->joinSub($unicaCompra, 'unica_compra', function ($join) {
+            $join->on('clientes.id', '=', 'unica_compra.cliente_id');
+        })
+        ->get();
+});
+
+/**
  * Importação
  */
 Route::get('/import', function () {
