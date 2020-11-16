@@ -9,8 +9,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
-use function Clue\StreamFilter\fun;
-
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -24,6 +22,13 @@ use function Clue\StreamFilter\fun;
 
 /**
  * 1. Liste os clientes ordenados pelo menor valor total em compras
+ *   SELECT `clientes`.`nome`, `clientes`.`cpf`
+ *   FROM `clientes`
+ *   INNER JOIN (
+ *       SELECT `cliente_id`, MIN(valorTotal) AS valorTotal
+ *       FROM `carrinhos`
+ *       GROUP BY `cliente_id`) AS `menores_compras` ON `clientes`.`id` = `menores_compras`.`cliente_id`
+ *   ORDER BY `menores_compras`.`valorTotal` ASC
  */
 Route::get('/clientes', function () {
 
@@ -46,32 +51,77 @@ Route::get('/clientes', function () {
  *    SELECT  `cliente_id`
  *    FROM  `carrinhos`
  *    WHERE  year(`carrinhos.data`) = '2019'
- *   `carrinhos`.`id`
- *    IN  (
- *        SELECT  `itens`.`carrinho_id`
- *        FROM  `itens`
- *        GROUP  BY  `itens`.`carrinho_id`
- *        HAVING  COUNT(itens.carrinho_id) = 1
- *        )
+ *    AND `carrinhos`.`id` IN  (
+ *           SELECT  `itens`.`carrinho_id`
+ *           FROM  `itens`
+ *           GROUP  BY  `itens`.`carrinho_id`
+ *           HAVING  COUNT(itens.carrinho_id) = 1
+ *    )
  *    GROUP  BY  `carrinhos`.`cliente_id`
- * ) AS   `unica_compra`
- * ON  `clientes`.`id` = `unica_compra`.`cliente_id`;
+ * ) AS   `unica_compra` ON  `clientes`.`id` = `unica_compra`.`cliente_id`;
  */
 Route::get('/clientes-maior-compra-unica/{ano?}', function ($ano = '2019') {
 
     $unicaCompra = Carrinho::select('cliente_id')
-                            ->whereYear('carrinhos.data',$ano)
-                            ->whereIn('carrinhos.id',function($query) {
-                                $query->select('itens.carrinho_id')
-                                    ->from('itens')
-                                    ->groupBy('itens.carrinho_id')
-                                    ->havingRaw('COUNT(itens.carrinho_id) = ?', [1]);
-                            })
-                            ->groupBy('carrinhos.cliente_id');
+        ->whereYear('carrinhos.data', $ano)
+        ->whereIn('carrinhos.id', function ($query) {
+            $query->select('itens.carrinho_id')
+                ->from('itens')
+                ->groupBy('itens.carrinho_id')
+                ->havingRaw('COUNT(itens.carrinho_id) = ?', [1]);
+        })
+        ->groupBy('carrinhos.cliente_id');
 
     return Cliente::select('clientes.nome', 'clientes.cpf')
         ->joinSub($unicaCompra, 'unica_compra', function ($join) {
             $join->on('clientes.id', '=', 'unica_compra.cliente_id');
+        })
+        ->get();
+});
+
+/**
+ * 3. Liste os clientes que mais realizaram compras no ano passado (2018)
+ *
+ * SELECT DISTINCT `clientes`.`nome`, `clientes`.`cpf`
+ * FROM `clientes`
+ * INNER JOIN (
+ * 	  SELECT `cliente_id`
+ * 	  FROM `carrinhos`
+ * 	  INNER JOIN (
+ * 		SELECT `itens`.`carrinho_id`, COUNT(itens.carrinho_id) AS quant_carrinho
+ * 		FROM `itens`
+ * 		GROUP BY `itens`.`carrinho_id`
+ * 		HAVING COUNT(itens.carrinho_id) > ?
+ * 		ORDER BY `quant_carrinho` desc
+ * 	  ) AS `mais_itens` ON `carrinhos`.`id` = `mais_itens`.`carrinho_id`
+ * 	 WHERE year(`carrinhos`.`data`) = ?
+ * ) AS `carrinho_mais_itens` ON `clientes`.`id` = `carrinho_mais_itens`.`cliente_id`
+ */
+Route::get('/clientes-com-mais-de/{quant}/{seletor}/{ano?}', function ($quant = 1, $seletor = 'carrinhos', $ano = '2018') {
+
+    if ($seletor == 'itens') {
+        $maisItensQue = Item::select('itens.carrinho_id', DB::raw('COUNT(itens.carrinho_id) AS quant_itens'))
+            ->groupBy('itens.carrinho_id')
+            ->having('quant_itens', '>', $quant)
+            ->orderBy('quant_itens', 'DESC');
+
+        $carrinhosSelecionados = Carrinho::select('cliente_id')
+            ->whereYear('carrinhos.data', $ano)
+            ->joinSub($maisItensQue, 'mais_itens', function ($join) {
+                $join->on('carrinhos.id', '=', 'mais_itens.carrinho_id');
+            });
+
+    } else {
+        $carrinhosSelecionados = Carrinho::select('cliente_id', DB::raw('COUNT(carrinhos.cliente_id) AS quant_carrinho'))
+            ->whereYear('carrinhos.data', $ano)
+            ->groupBy('carrinhos.cliente_id')
+            ->having('quant_carrinho', '>', $quant)
+            ->orderBy('quant_carrinho', 'DESC');
+    }
+
+    return Cliente::distinct()->select('clientes.nome', 'clientes.cpf')
+        ->joinSub($carrinhosSelecionados, 'carrinhos_selecionados', function ($join) {
+            $join->on('clientes.id', '=', 'carrinhos_selecionados.cliente_id');
         })
         ->get();
 });
