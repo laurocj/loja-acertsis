@@ -34,7 +34,7 @@ Route::get('/clientes', function () {
 
     $menoresCompras = Carrinho::select('cliente_id', DB::raw('MIN(valorTotal) AS valorTotal'))->groupBy('cliente_id');
 
-    return Cliente::select('clientes.nome', 'clientes.cpf')
+    return Cliente::select('clientes.nome', 'clientes.cpf','valorTotal')
         ->joinSub($menoresCompras, 'menores_compras', function ($join) {
             $join->on('clientes.id', '=', 'menores_compras.cliente_id');
         })
